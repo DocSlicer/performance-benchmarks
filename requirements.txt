@@ -1,0 +1,9 @@
+datasets>=2.14.0
+langchain>=0.1.0
+langchain-openai>=0.0.5
+docling>=1.0.0
+tiktoken>=0.5.0
+openai>=1.0.0
+numpy>=1.24.0
+requests>=2.28.0
+
