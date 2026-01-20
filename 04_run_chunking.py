@@ -5,6 +5,8 @@
 Run all chunking methods on benchmark documents.
 Generates chunks for each method and stores them for evaluation.
 
+Includes DocSlicer which requires PDF/HTML files for layout-aware chunking.
+
 Usage:
     python 04_run_chunking.py [--method METHOD] [--dataset DATASET]
 """
@@ -14,14 +16,16 @@ import os
 import sys
 import re
 import hashlib
+import asyncio
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import time
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config import (
-    DATA_DIR, CUAD_DIR, QASPER_DIR, RFC_DIR,
-    CHUNKING_METHODS, DATASETS, get_openai_key
+    DATA_DIR, CUAD_DIR, ACL_DIR, RFC_DIR,
+    CHUNKING_METHODS, DATASETS, get_openai_key,
+    get_docslicer_api_key, get_docslicer_api_url
 )
 
 # Chunking parameters
@@ -50,12 +54,11 @@ def chunk_hash(text: str) -> str:
 
 
 # ============================================================
-# CHUNKING METHODS
+# TEXT-BASED CHUNKING METHODS
 # ============================================================
 
 def chunk_fixed_token(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[Dict]:
     """Fixed token chunking with overlap."""
-    # Approximate: 4 chars per token
     char_size = chunk_size * 4
     char_overlap = overlap * 4
     
@@ -91,7 +94,7 @@ def chunk_recursive(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUN
         from langchain_text_splitters import RecursiveCharacterTextSplitter
     
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size * 4,  # Convert to chars
+        chunk_size=chunk_size * 4,
         chunk_overlap=overlap * 4,
         separators=["\n\n", "\n", ". ", " ", ""],
     )
@@ -152,14 +155,11 @@ def chunk_semantic(text: str, api_key: str) -> List[Dict]:
 
 def chunk_flat_header(text: str) -> List[Dict]:
     """Split on markdown/document headers."""
-    # Pattern for common headers
     header_pattern = r'(?:^|\n)(#{1,6}\s+.+|[A-Z][A-Za-z\s]+:?\n[=-]+|\d+\.?\s+[A-Z][A-Za-z\s]+)'
     
-    # Find all header positions
     headers = list(re.finditer(header_pattern, text))
     
     if not headers:
-        # No headers found, return whole doc as one chunk
         return [{
             "text": text,
             "start": 0,
@@ -203,15 +203,12 @@ def chunk_docling(text: str) -> List[Dict]:
             return chunk_flat_header(text)
     
     try:
-        # Create a minimal document structure
         doc = DoclingDocument(name="benchmark_doc")
         
-        # Split text into paragraphs and add each
         paragraphs = text.split('\n\n')
         for para in paragraphs:
             para = para.strip()
             if para:
-                # Detect if it's a header or regular text
                 if para.startswith('#') or (len(para) < 100 and para.isupper()):
                     doc.add_text(label=DocItemLabel.SECTION_HEADER, text=para)
                 else:
@@ -240,10 +237,189 @@ def chunk_docling(text: str) -> List[Dict]:
 
 
 # ============================================================
+# DOCSLICER - Layout-Aware Chunking (requires PDF/HTML)
+# ============================================================
+
+def chunk_docslicer_local(
+    doc: dict,
+    dataset_dir: Path,
+) -> List[Dict]:
+    """
+    Use DocSlicer's local parsing pipeline for layout-aware chunking.
+    Requires pdf_path or html_path in the document.
+    
+    Returns empty list on failure (NO FALLBACK - for accurate benchmarking).
+    """
+    # Add the backend to path for imports
+    backend_path = Path(__file__).parent.parent.parent / "backend"
+    if str(backend_path) not in sys.path:
+        sys.path.insert(0, str(backend_path))
+    
+    try:
+        from app.services.parsing.orchestrator import run_pipeline
+    except ImportError as e:
+        print(f"    DocSlicer import error: {e}")
+        return []  # NO FALLBACK
+    
+    # Determine file path
+    pdf_path = doc.get("pdf_path")
+    html_path = doc.get("html_path")
+    
+    if pdf_path:
+        file_path = dataset_dir / pdf_path
+        content_type = "pdf"
+    elif html_path:
+        file_path = dataset_dir / html_path
+        content_type = "html"
+    else:
+        print(f"    No PDF or HTML path for doc {doc['id']}, skipping docslicer")
+        return []  # NO FALLBACK
+    
+    if not file_path.exists():
+        print(f"    File not found: {file_path}, skipping docslicer")
+        return []  # NO FALLBACK
+    
+    try:
+        # Read file content
+        with open(file_path, "rb") as f:
+            content = f.read()
+        
+        # For HTML, decode to string
+        if content_type == "html":
+            content = content.decode("utf-8", errors="replace")
+        
+        # Run async pipeline
+        result = asyncio.run(
+            run_pipeline(
+                content=content,
+                content_type=content_type,
+                source_url=None,
+            )
+        )
+        
+        # Unpack result - may be tuple of (df_chunks, df_table_cells, ...) or just df_chunks
+        if isinstance(result, tuple):
+            df_chunks = result[0]
+        else:
+            df_chunks = result
+        
+        # Convert DataFrame to chunk list
+        chunks = []
+        for i, row in df_chunks.iterrows():
+            chunk_text = row.get("text", "")
+            if not chunk_text:
+                continue
+            
+            # Try to find position in original text (approximate)
+            start = doc["text"].find(chunk_text[:100]) if len(chunk_text) > 100 else doc["text"].find(chunk_text)
+            if start == -1:
+                start = 0
+            
+            chunks.append({
+                "text": chunk_text,
+                "start": start,
+                "end": start + len(chunk_text),
+                "method": "docslicer",
+                # Include DocSlicer-specific metadata
+                "heading": row.get("chunk_heading", ""),
+                "heading_level": row.get("heading_level", None),
+                "page_number": row.get("page_number", None),
+            })
+        
+        return chunks  # Return whatever we got (even if empty)
+        
+    except Exception as e:
+        print(f"    DocSlicer error: {e}")
+        return []  # NO FALLBACK
+
+
+def chunk_docslicer_api(
+    doc: dict,
+    dataset_dir: Path,
+    api_url: str,
+    api_key: str,
+) -> List[Dict]:
+    """
+    Use DocSlicer API for layout-aware chunking.
+    Requires pdf_path or html_path in the document.
+    
+    Returns empty list on failure (NO FALLBACK - for accurate benchmarking).
+    """
+    import requests
+    
+    pdf_path = doc.get("pdf_path")
+    html_path = doc.get("html_path")
+    
+    if pdf_path:
+        file_path = dataset_dir / pdf_path
+        content_type = "application/pdf"
+    elif html_path:
+        file_path = dataset_dir / html_path
+        content_type = "text/html"
+    else:
+        print(f"    No PDF or HTML path for doc {doc['id']}, skipping docslicer")
+        return []  # NO FALLBACK
+    
+    if not file_path.exists():
+        print(f"    File not found: {file_path}, skipping docslicer")
+        return []  # NO FALLBACK
+    
+    try:
+        with open(file_path, "rb") as f:
+            files = {"file": (file_path.name, f, content_type)}
+            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+            
+            response = requests.post(
+                f"{api_url}/api/v1/chunk",
+                files=files,
+                headers=headers,
+                timeout=120,
+            )
+            response.raise_for_status()
+        
+        result = response.json()
+        chunks_data = result.get("chunks", [])
+        
+        chunks = []
+        for i, chunk_data in enumerate(chunks_data):
+            chunk_text = chunk_data.get("text", "")
+            if not chunk_text:
+                continue
+            
+            start = doc["text"].find(chunk_text[:100]) if len(chunk_text) > 100 else doc["text"].find(chunk_text)
+            if start == -1:
+                start = 0
+            
+            chunks.append({
+                "text": chunk_text,
+                "start": start,
+                "end": start + len(chunk_text),
+                "method": "docslicer",
+                "heading": chunk_data.get("heading", ""),
+                "heading_level": chunk_data.get("heading_level"),
+                "page_number": chunk_data.get("page_number"),
+            })
+        
+        return chunks  # Return whatever we got (even if empty)
+        
+    except Exception as e:
+        print(f"    DocSlicer API error: {e}")
+        return []  # NO FALLBACK
+
+
+# ============================================================
 # MAIN PROCESSING
 # ============================================================
 
-def process_document(doc: dict, methods: List[str], api_key: str = None) -> Dict[str, List[Dict]]:
+def process_document(
+    doc: dict,
+    methods: List[str],
+    dataset_dir: Path,
+    api_key: str = None,
+    docslicer_api_url: str = None,
+    docslicer_api_key: str = None,
+    use_docslicer_local: bool = True,
+) -> Dict[str, List[Dict]]:
     """Process a single document with all specified chunking methods."""
     text = doc["text"]
     results = {}
@@ -263,6 +439,15 @@ def process_document(doc: dict, methods: List[str], api_key: str = None) -> Dict
                 chunks = chunk_flat_header(text)
             elif method == "docling":
                 chunks = chunk_docling(text)
+            elif method == "docslicer":
+                # DocSlicer requires PDF/HTML
+                if use_docslicer_local:
+                    chunks = chunk_docslicer_local(doc, dataset_dir)
+                else:
+                    if not docslicer_api_url:
+                        print(f"    Skipping docslicer (no API URL)")
+                        continue
+                    chunks = chunk_docslicer_api(doc, dataset_dir, docslicer_api_url, docslicer_api_key)
             else:
                 print(f"    Unknown method: {method}")
                 continue
@@ -290,6 +475,9 @@ def process_dataset(
     dataset_dir: Path,
     methods: List[str],
     api_key: str = None,
+    docslicer_api_url: str = None,
+    docslicer_api_key: str = None,
+    use_docslicer_local: bool = True,
     max_docs: int = None
 ) -> Dict[str, Any]:
     """Process all documents in a dataset."""
@@ -297,7 +485,6 @@ def process_dataset(
     print(f"Processing {dataset_name.upper()}")
     print(f"{'='*60}")
     
-    # Load prepared documents
     prepared_dir = dataset_dir / "prepared"
     docs_file = prepared_dir / "documents.json"
     
@@ -309,7 +496,12 @@ def process_dataset(
     if max_docs:
         docs = docs[:max_docs]
     
-    print(f"  Documents: {len(docs)}")
+    # Check PDF/HTML availability for docslicer
+    if "docslicer" in methods:
+        docs_with_files = sum(1 for d in docs if d.get("pdf_path") or d.get("html_path"))
+        print(f"  Documents: {len(docs)} ({docs_with_files} with PDF/HTML for docslicer)")
+    else:
+        print(f"  Documents: {len(docs)}")
     print(f"  Methods: {', '.join(methods)}")
     
     # Process each document
@@ -317,13 +509,14 @@ def process_dataset(
     stats = {method: {"total_chunks": 0, "total_chars": 0, "total_tokens": 0} for method in methods}
     
     for i, doc in enumerate(docs):
-        # Show progress for every document
         doc_title = doc.get('title', doc['id'])[:40]
         print(f"  [{i+1}/{len(docs)}] {doc_title}...", end=" ", flush=True)
         
-        results = process_document(doc, methods, api_key)
+        results = process_document(
+            doc, methods, dataset_dir, api_key,
+            docslicer_api_url, docslicer_api_key, use_docslicer_local
+        )
         
-        # Show chunk counts for this doc
         chunk_counts = [f"{m}:{len(results.get(m, []))}" for m in methods if results.get(m)]
         print(f"-> {', '.join(chunk_counts)}")
         
@@ -360,13 +553,13 @@ def main():
     parser = argparse.ArgumentParser(description="Run chunking methods on benchmark documents")
     parser.add_argument(
         "--method",
-        choices=["fixed_token", "recursive", "semantic", "flat_header", "docling", "all"],
+        choices=["fixed_token", "recursive", "semantic", "flat_header", "docling", "docslicer", "all", "all_with_docslicer"],
         default="all",
-        help="Which method to run (default: all)"
+        help="Which method to run (default: all without docslicer)"
     )
     parser.add_argument(
         "--dataset",
-        choices=["cuad", "qasper", "rfc", "all"],
+        choices=["cuad", "acl", "rfc", "all"],
         default="all",
         help="Which dataset to process (default: all)"
     )
@@ -376,6 +569,11 @@ def main():
         default=None,
         help="Max documents per dataset (for testing)"
     )
+    parser.add_argument(
+        "--docslicer-api",
+        action="store_true",
+        help="Use DocSlicer API instead of local pipeline"
+    )
     args = parser.parse_args()
     
     print("="*60)
@@ -384,35 +582,48 @@ def main():
     
     # Determine methods to run
     if args.method == "all":
-        # Skip semantic chunker (very slow - needs API calls per chunk)
         methods = ["fixed_token", "recursive", "flat_header", "docling"]
-        print("Note: Skipping 'semantic' method (slow). Use --method semantic to include it.")
-    elif args.method == "all_with_semantic":
-        methods = ["fixed_token", "recursive", "semantic", "flat_header", "docling"]
+        print("Note: Use --method all_with_docslicer to include DocSlicer")
+    elif args.method == "all_with_docslicer":
+        methods = ["fixed_token", "recursive", "flat_header", "docling", "docslicer"]
     else:
         methods = [args.method]
     
     print(f"Methods: {', '.join(methods)}")
     
-    # Get API key for semantic chunking
-    api_key = get_openai_key()
-    if "semantic" in methods and not api_key:
+    # Get API keys
+    openai_key = get_openai_key()
+    docslicer_api_url = get_docslicer_api_url()
+    docslicer_api_key = get_docslicer_api_key()
+    use_docslicer_local = not args.docslicer_api
+    
+    if "semantic" in methods and not openai_key:
         print("WARNING: OPENAI_API_KEY not set, skipping semantic chunking")
         methods = [m for m in methods if m != "semantic"]
+    
+    if "docslicer" in methods:
+        if use_docslicer_local:
+            print("DocSlicer: Using local pipeline")
+        else:
+            print(f"DocSlicer: Using API at {docslicer_api_url}")
     
     # Determine datasets
     datasets = []
     if args.dataset in ["cuad", "all"]:
         datasets.append(("cuad", CUAD_DIR))
-    if args.dataset in ["qasper", "all"]:
-        datasets.append(("qasper", QASPER_DIR))
+    if args.dataset in ["acl", "all"]:
+        datasets.append(("acl", ACL_DIR))
     if args.dataset in ["rfc", "all"]:
         datasets.append(("rfc", RFC_DIR))
     
     all_stats = []
     
     for name, dir_path in datasets:
-        stats = process_dataset(name, dir_path, methods, api_key, args.max_docs)
+        stats = process_dataset(
+            name, dir_path, methods, openai_key,
+            docslicer_api_url, docslicer_api_key, use_docslicer_local,
+            args.max_docs
+        )
         if stats:
             all_stats.append(stats)
     
@@ -445,4 +656,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

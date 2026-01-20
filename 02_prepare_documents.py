@@ -19,7 +19,7 @@ from collections import Counter
 import hashlib
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config import DATA_DIR, CUAD_DIR, QASPER_DIR, RFC_DIR, DATASETS
+from config import DATA_DIR, CUAD_DIR, ACL_DIR, RFC_DIR, DATASETS
 
 
 def load_json(path: Path) -> list:
@@ -104,16 +104,32 @@ def validate_questions(questions: list, docs: list, dataset_name: str) -> dict:
 
 def normalize_document(doc: dict, dataset: str) -> dict:
     """Normalize document to unified schema."""
-    return {
+    normalized = {
         "id": doc["id"],
         "title": doc.get("title", doc["id"]),
         "text": doc["text"],
         "char_count": len(doc["text"]),
         "domain": DATASETS[dataset]["domain"],
         "dataset": dataset,
-        # Preserve original fields
-        **{k: v for k, v in doc.items() if k not in ["id", "title", "text", "char_count"]}
     }
+    
+    # Preserve file paths for docslicer
+    if doc.get("pdf_path"):
+        normalized["pdf_path"] = doc["pdf_path"]
+    if doc.get("html_path"):
+        normalized["html_path"] = doc["html_path"]
+    if doc.get("pdf_url"):
+        normalized["pdf_url"] = doc["pdf_url"]
+    if doc.get("html_url"):
+        normalized["html_url"] = doc["html_url"]
+    
+    # Preserve other original fields
+    preserved_fields = ["id", "title", "text", "char_count", "pdf_path", "html_path", "pdf_url", "html_url"]
+    for k, v in doc.items():
+        if k not in preserved_fields and k not in normalized:
+            normalized[k] = v
+    
+    return normalized
 
 
 def normalize_question(q: dict, dataset: str) -> dict:
@@ -300,7 +316,7 @@ def main():
     
     datasets = [
         ("cuad", CUAD_DIR),
-        ("qasper", QASPER_DIR),
+        ("acl", ACL_DIR),
         ("rfc", RFC_DIR),
     ]
     

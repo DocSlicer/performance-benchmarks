@@ -22,7 +22,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config import (
-    DATA_DIR, CUAD_DIR, QASPER_DIR, RFC_DIR,
+    DATA_DIR, CUAD_DIR, ACL_DIR, RFC_DIR,
     EMBEDDING_MODEL, RETRIEVAL_K_VALUES, get_openai_key
 )
 
@@ -380,13 +380,13 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate retrieval performance")
     parser.add_argument(
         "--dataset",
-        choices=["cuad", "qasper", "rfc", "all"],
+        choices=["cuad", "acl", "rfc", "all"],
         default="all",
         help="Which dataset to evaluate"
     )
     parser.add_argument(
         "--method",
-        choices=["fixed_token", "recursive", "flat_header", "docling", "all"],
+        choices=["fixed_token", "recursive", "flat_header", "docling", "docslicer", "all"],
         default="all",
         help="Which method to evaluate"
     )
@@ -414,7 +414,7 @@ def main():
     
     # Methods to evaluate
     if args.method == "all":
-        methods = ["fixed_token", "recursive", "flat_header", "docling"]
+        methods = ["fixed_token", "recursive", "flat_header", "docling", "docslicer"]
     else:
         methods = [args.method]
     
@@ -425,8 +425,8 @@ def main():
     datasets = []
     if args.dataset in ["cuad", "all"]:
         datasets.append(("cuad", CUAD_DIR))
-    if args.dataset in ["qasper", "all"]:
-        datasets.append(("qasper", QASPER_DIR))
+    if args.dataset in ["acl", "all"]:
+        datasets.append(("acl", ACL_DIR))
     if args.dataset in ["rfc", "all"]:
         datasets.append(("rfc", RFC_DIR))
     

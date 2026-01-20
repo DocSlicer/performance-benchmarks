@@ -1,0 +1,149 @@
+{
+  "datasets": [
+    {
+      "dataset": "cuad",
+      "documents": 510,
+      "methods": {
+        "fixed_token": {
+          "total_chunks": 15083,
+          "total_chars": 29721733,
+          "total_tokens": 7430236,
+          "avg_chunk_chars": 1970,
+          "avg_chunk_tokens": 492,
+          "chunks_per_doc": 29.57450980392157
+        },
+        "recursive": {
+          "total_chunks": 18959,
+          "total_chars": 27422895,
+          "total_tokens": 6848718,
+          "avg_chunk_chars": 1446,
+          "avg_chunk_tokens": 361,
+          "chunks_per_doc": 37.174509803921566
+        },
+        "flat_header": {
+          "total_chunks": 5517,
+          "total_chars": 22682808,
+          "total_tokens": 5668634,
+          "avg_chunk_chars": 4111,
+          "avg_chunk_tokens": 1027,
+          "chunks_per_doc": 10.81764705882353
+        },
+        "docling": {
+          "total_chunks": 68463,
+          "total_chars": 26233962,
+          "total_tokens": 6532842,
+          "avg_chunk_chars": 383,
+          "avg_chunk_tokens": 95,
+          "chunks_per_doc": 134.24117647058824
+        },
+        "docslicer": {
+          "total_chunks": 19450,
+          "total_chars": 25603590,
+          "total_tokens": 6393658,
+          "avg_chunk_chars": 1316,
+          "avg_chunk_tokens": 328,
+          "chunks_per_doc": 38.13725490196079
+        }
+      }
+    },
+    {
+      "dataset": "acl",
+      "documents": 38,
+      "methods": {
+        "fixed_token": {
+          "total_chunks": 961,
+          "total_chars": 1889930,
+          "total_tokens": 472470,
+          "avg_chunk_chars": 1966,
+          "avg_chunk_tokens": 491,
+          "chunks_per_doc": 25.289473684210527
+        },
+        "recursive": {
+          "total_chunks": 1146,
+          "total_chars": 1831639,
+          "total_tokens": 457471,
+          "avg_chunk_chars": 1598,
+          "avg_chunk_tokens": 399,
+          "chunks_per_doc": 30.157894736842106
+        },
+        "flat_header": {
+          "total_chunks": 1010,
+          "total_chars": 1670641,
+          "total_tokens": 417276,
+          "avg_chunk_chars": 1654,
+          "avg_chunk_tokens": 413,
+          "chunks_per_doc": 26.57894736842105
+        },
+        "docling": {
+          "total_chunks": 432,
+          "total_chars": 1696469,
+          "total_tokens": 423948,
+          "avg_chunk_chars": 3927,
+          "avg_chunk_tokens": 981,
+          "chunks_per_doc": 11.368421052631579
+        },
+        "docslicer": {
+          "total_chunks": 1089,
+          "total_chars": 1803923,
+          "total_tokens": 450568,
+          "avg_chunk_chars": 1656,
+          "avg_chunk_tokens": 413,
+          "chunks_per_doc": 28.657894736842106
+        }
+      }
+    },
+    {
+      "dataset": "rfc",
+      "documents": 154,
+      "methods": {
+        "fixed_token": {
+          "total_chunks": 6292,
+          "total_chars": 12441880,
+          "total_tokens": 3110404,
+          "avg_chunk_chars": 1977,
+          "avg_chunk_tokens": 494,
+          "chunks_per_doc": 40.857142857142854
+        },
+        "recursive": {
+          "total_chunks": 6687,
+          "total_chars": 11620044,
+          "total_tokens": 2902405,
+          "avg_chunk_chars": 1737,
+          "avg_chunk_tokens": 434,
+          "chunks_per_doc": 43.422077922077925
+        },
+        "flat_header": {
+          "total_chunks": 1443,
+          "total_chars": 10450554,
+          "total_tokens": 2612093,
+          "avg_chunk_chars": 7242,
+          "avg_chunk_tokens": 1810,
+          "chunks_per_doc": 9.37012987012987
+        },
+        "docling": {
+          "total_chunks": 50874,
+          "total_chars": 10888943,
+          "total_tokens": 2702052,
+          "avg_chunk_chars": 214,
+          "avg_chunk_tokens": 53,
+          "chunks_per_doc": 330.35064935064935
+        },
+        "docslicer": {
+          "total_chunks": 6245,
+          "total_chars": 9531838,
+          "total_tokens": 2380643,
+          "avg_chunk_chars": 1526,
+          "avg_chunk_tokens": 381,
+          "chunks_per_doc": 40.55194805194805
+        }
+      }
+    }
+  ],
+  "methods": [
+    "fixed_token",
+    "recursive",
+    "flat_header",
+    "docling",
+    "docslicer"
+  ]
+}
